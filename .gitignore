@@ -1,3 +1,7 @@
+/build
+# Personal test project
+/sandbox 
+
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
