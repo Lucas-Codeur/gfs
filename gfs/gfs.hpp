@@ -30,13 +30,12 @@ If anyone ever wants to read this code instead of enjoying life, I'd better expl
     {                                                           \
         std::stringstream ss;                                   \
         ss << msg;                                              \
-        std::cout << "[GFS DEBUG]: " << ss.str() << std::endl;    \
+        std::cout << "[GFS DEBUG]: " << ss.str() << std::endl;  \
     }
 #else
 #define GFS_DEBUG(msg)
 #endif
 
-#define GFS_UNDEFINED 0
 
 namespace gfs
 {
@@ -45,9 +44,6 @@ namespace gfs
     inline constexpr uint32_t GFS_VERSION_PATCH = 0;
 
     inline constexpr uint32_t GFS_MAGIC = 0x47465330; // GFS0
-
-    inline constexpr bool GFS_SUCCESS = true;
-    inline constexpr bool GFS_FAILED = false;
 
     inline constexpr unsigned int GFS_HEADER_SIZE = 4 * sizeof(uint32_t) + 1 * sizeof(uint64_t);
 
@@ -58,7 +54,7 @@ namespace gfs
         uint32_t versionMinor;
         uint32_t fileCount;
         uint64_t indexOffset; // The index is written after the data
-        bool valid;
+        bool valid; // Not written in the file, used for validation
     };
 
     struct IndexEntry
@@ -69,43 +65,45 @@ namespace gfs
         // followed immediatly by the path bytes in the file
     };
 
+    typedef std::vector<IndexEntry> Index;
+
     struct Archive
     {
         bool loaded = false;
         Header header;
+        Index index;
     };
 
     struct SourceFile
     {
         std::string sourcePath;
         std::string virtualPath;
-        uint64_t offset = GFS_UNDEFINED;
-        uint64_t size = GFS_UNDEFINED;
     };
 
-    enum GfsResult {
+    enum class GfsResult {
         SUCCESS = 0,
         OUTPUT_FILE_ERROR = 1,
         SOURCE_FILE_ERROR = 2,
         WRITE_ERROR = 3,
     };
 
-    inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
+    inline gfs::GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
     inline Archive readArchive(const std::string& path);
 
     namespace internal
     {
         inline void writeHeaderPlaceholder(std::ostream &output);
-        inline void writeIndex(const std::vector<IndexEntry> &index, std::ostream &output);
         inline std::vector<IndexEntry> writeContent(const std::vector<SourceFile> &files, std::ostream &output);
+        inline void writeIndex(const Index &index, std::ostream &output);
 
         inline void writeU32(std::ostream &output, uint32_t value);
         inline void writeU64(std::ostream &output, uint64_t value);
 
         inline Header readHeader(std::ifstream &input);
+        inline Index readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream& input);
 
         inline uint32_t readU32(std::ifstream& input);
-        inline uint32_t readU64(std::ifstream& input);
+        inline uint64_t readU64(std::ifstream& input);
     }
 
     // Implementation
@@ -116,35 +114,35 @@ namespace gfs
 
         std::ofstream file(outputPath, std::ios::binary);
         if (!file.good())
-            return OUTPUT_FILE_ERROR;
+            return GfsResult::OUTPUT_FILE_ERROR;
 
         internal::writeHeaderPlaceholder(file); // Header is the first byte sequence
         std::vector<IndexEntry> index = internal::writeContent(files, file);
 
         uint64_t indexPos = static_cast<uint64_t>(file.tellp());
         if (indexPos == std::streampos(-1)) 
-            return WRITE_ERROR;
+            return GfsResult::WRITE_ERROR;
         internal::writeIndex(index, file);
 
         if (!file)
-            return OUTPUT_FILE_ERROR;
+            return GfsResult::WRITE_ERROR;
 
         uint32_t fileCount = static_cast<uint32_t>(index.size());
-        file.seekp(3 * sizeof(uint32_t), std::ios::beg);
+        file.seekp(GFS_HEADER_SIZE - sizeof(uint64_t) - sizeof(uint32_t), std::ios::beg);
         internal::writeU32(file, fileCount);
 
-        file.seekp(4 * sizeof(uint32_t), std::ios::beg);
+        file.seekp(GFS_HEADER_SIZE - sizeof(uint64_t), std::ios::beg);
         internal::writeU64(file, indexPos);
 
         GFS_DEBUG("Failed files: " << (files.size() - fileCount))
         GFS_DEBUG("Total files: " << fileCount)
 
         GFS_DEBUG("Archive created successfully");
-        return SUCCESS;
+        return GfsResult::SUCCESS;
     }
 
     inline Archive readArchive(const std::string& path) {
-        Archive result{};
+        Archive result;
 
         std::ifstream file(path.c_str(), std::ifstream::binary);
         if (!file || !file.is_open())
@@ -159,9 +157,9 @@ namespace gfs
             return result;
         }
         result.header = header;
+        result.index = internal::readIndex(header.indexOffset, header.fileCount, file);
 
-
-
+        result.loaded = true;
         return result;
     }
 
@@ -175,12 +173,13 @@ namespace gfs
         header.fileCount = readU32(input);
         header.indexOffset = readU64(input);
 
-        if (header.magic != GFS_MAGIC) 
+        if (header.magic != GFS_MAGIC || header.versionMajor != GFS_VERSION_MAJOR) 
             header.valid = false;
 
+        // Even if the header is invalid, printing info may help debugging
         GFS_DEBUG("--- Header informations ---");
         GFS_DEBUG("Magic: " << header.magic);
-        GFS_DEBUG("Version : " << header.versionMajor << "." << header.versionMinor);
+        GFS_DEBUG("Version: " << header.versionMajor << "." << header.versionMinor);
         GFS_DEBUG("File count: " << header.fileCount);
         GFS_DEBUG("Index pos: " << header.indexOffset);
         GFS_DEBUG("Is valid: " << header.valid << "\n");
@@ -188,11 +187,39 @@ namespace gfs
         return header;
     }
 
-    inline uint32_t internal::readU64(std::ifstream& input) {
+    inline Index internal::readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream& input) {
+        Index index;
+
+        input.seekg(indexPos, std::ios::beg);
+
+        std::vector<char> buffer;
+        for (uint32_t i = 0; i < fileCount; i++) {
+            IndexEntry entry;
+            entry.size = readU64(input);
+            entry.offset = readU64(input);
+
+            uint32_t pathLength = readU32(input);
+            buffer.resize(pathLength);
+            input.read(buffer.data(), buffer.size());
+            entry.virtualPath = std::string(buffer.begin(), buffer.end());
+
+            index.push_back(entry);
+
+            GFS_DEBUG("-- Index entry --");
+            GFS_DEBUG("Size: " << entry.size);
+            GFS_DEBUG("Offset: " << entry.offset);
+            GFS_DEBUG("Path length: " << pathLength);
+            GFS_DEBUG("Path: " << entry.virtualPath << "\n");
+        }
+
+        return index;
+    }
+
+    inline uint64_t internal::readU64(std::ifstream& input) {
         uint32_t high = readU32(input);
         uint32_t low = readU32(input);
 
-        return static_cast<uint64_t>((high << 16) | low);
+        return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
     }
 
     inline uint32_t internal::readU32(std::ifstream& input) {
@@ -233,7 +260,7 @@ namespace gfs
         writeU32(output, static_cast<uint32_t>(value & 0xFFFFFFFFu));
     }
 
-    inline void internal::writeIndex(const std::vector<IndexEntry> &index, std::ostream &output)
+    inline void internal::writeIndex(const Index &index, std::ostream &output)
     {
         for (auto &entry : index)
         {
