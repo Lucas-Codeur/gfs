@@ -58,15 +58,8 @@ namespace gfs
         uint32_t versionMinor;
         uint32_t fileCount;
         uint64_t indexOffset; // The index is written after the data
+        bool valid;
     };
-
-    /*struct IndexFile
-    {
-        uint64_t size;
-        uint64_t offset;
-        uint32_t path_length;
-        // followed immediatly by the path bytes in the file
-    };*/
 
     struct IndexEntry
     {
@@ -76,13 +69,11 @@ namespace gfs
         // followed immediatly by the path bytes in the file
     };
 
-    /*struct Archive
+    struct Archive
     {
-        std::string path;
-        uint32_t fileCount;
-        uint32_t versionMajor;
-        uint32_t versionMinor;
-    };*/
+        bool loaded = false;
+        Header header;
+    };
 
     struct SourceFile
     {
@@ -99,7 +90,8 @@ namespace gfs
         WRITE_ERROR = 3,
     };
 
-    GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
+    inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
+    inline Archive readArchive(const std::string& path);
 
     namespace internal
     {
@@ -109,11 +101,16 @@ namespace gfs
 
         inline void writeU32(std::ostream &output, uint32_t value);
         inline void writeU64(std::ostream &output, uint64_t value);
+
+        inline Header readHeader(std::ifstream &input);
+
+        inline uint32_t readU32(std::ifstream& input);
+        inline uint32_t readU64(std::ifstream& input);
     }
 
     // Implementation
 
-    GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files)
+    inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files)
     {
         GFS_DEBUG("Attempting to create archive " << outputPath);
 
@@ -144,6 +141,68 @@ namespace gfs
 
         GFS_DEBUG("Archive created successfully");
         return SUCCESS;
+    }
+
+    inline Archive readArchive(const std::string& path) {
+        Archive result{};
+
+        std::ifstream file(path.c_str(), std::ifstream::binary);
+        if (!file || !file.is_open())
+        {
+            GFS_DEBUG("Error, could not open archive " << path);
+            return result;
+        }
+
+        Header header = internal::readHeader(file);
+        if (!header.valid) {
+            GFS_DEBUG("Invalid header, please check file format and data integrity");
+            return result;
+        }
+        result.header = header;
+
+
+
+        return result;
+    }
+
+    inline Header internal::readHeader(std::ifstream& input) {
+        Header header{};
+        header.valid = true;
+        
+        header.magic = readU32(input);
+        header.versionMajor = readU32(input);
+        header.versionMinor = readU32(input);
+        header.fileCount = readU32(input);
+        header.indexOffset = readU64(input);
+
+        if (header.magic != GFS_MAGIC) 
+            header.valid = false;
+
+        GFS_DEBUG("--- Header informations ---");
+        GFS_DEBUG("Magic: " << header.magic);
+        GFS_DEBUG("Version : " << header.versionMajor << "." << header.versionMinor);
+        GFS_DEBUG("File count: " << header.fileCount);
+        GFS_DEBUG("Index pos: " << header.indexOffset);
+        GFS_DEBUG("Is valid: " << header.valid << "\n");
+
+        return header;
+    }
+
+    inline uint32_t internal::readU64(std::ifstream& input) {
+        uint32_t high = readU32(input);
+        uint32_t low = readU32(input);
+
+        return static_cast<uint64_t>((high << 16) | low);
+    }
+
+    inline uint32_t internal::readU32(std::ifstream& input) {
+        unsigned char bytes[4];
+        input.read(reinterpret_cast<char*>(bytes), sizeof(bytes));
+
+        return (static_cast<uint32_t>(bytes[0]) << 24) |
+               (static_cast<uint32_t>(bytes[1]) << 16) |
+               (static_cast<uint32_t>(bytes[2]) << 8)  |
+               (static_cast<uint32_t>(bytes[3]));
     }
 
     inline void internal::writeHeaderPlaceholder(std::ostream &output)
