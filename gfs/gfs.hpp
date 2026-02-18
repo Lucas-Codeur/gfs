@@ -14,7 +14,6 @@ See LICENSE file for details.
 #include <string>
 #include <vector>
 #include <fstream>
-#include <sstream>
 
 /*
 If anyone ever wants to read this code instead of enjoying life, I'd better explain the terminology :
@@ -26,6 +25,7 @@ If anyone ever wants to read this code instead of enjoying life, I'd better expl
 
 #ifdef GFS_ENABLE_DEBUG
 #include <iostream>
+#include <sstream>
 #define GFS_DEBUG(msg)                                          \
     {                                                           \
         std::stringstream ss;                                   \
@@ -92,7 +92,14 @@ namespace gfs
         uint64_t size = GFS_UNDEFINED;
     };
 
-    bool createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
+    enum GfsResult {
+        SUCCESS = 0,
+        OUTPUT_FILE_ERROR = 1,
+        SOURCE_FILE_ERROR = 2,
+        WRITE_ERROR = 3,
+    };
+
+    GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
 
     namespace internal
     {
@@ -106,23 +113,24 @@ namespace gfs
 
     // Implementation
 
-    bool createArchive(const std::string &outputPath, const std::vector<SourceFile> &files)
+    GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files)
     {
         GFS_DEBUG("Attempting to create archive " << outputPath);
 
         std::ofstream file(outputPath, std::ios::binary);
         if (!file.good())
-            return GFS_FAILED;
+            return OUTPUT_FILE_ERROR;
 
-        file.clear();                           // We work with offset math so the file better be empty
         internal::writeHeaderPlaceholder(file); // Header is the first byte sequence
         std::vector<IndexEntry> index = internal::writeContent(files, file);
 
-        uint64_t indexPos = file.tellp();
+        uint64_t indexPos = static_cast<uint64_t>(file.tellp());
+        if (indexPos == std::streampos(-1)) 
+            return WRITE_ERROR;
         internal::writeIndex(index, file);
 
         if (!file)
-            return GFS_FAILED;
+            return OUTPUT_FILE_ERROR;
 
         uint32_t fileCount = static_cast<uint32_t>(index.size());
         file.seekp(3 * sizeof(uint32_t), std::ios::beg);
@@ -135,7 +143,7 @@ namespace gfs
         GFS_DEBUG("Total files: " << fileCount)
 
         GFS_DEBUG("Archive created successfully");
-        return GFS_SUCCESS;
+        return SUCCESS;
     }
 
     inline void internal::writeHeaderPlaceholder(std::ostream &output)
@@ -162,8 +170,8 @@ namespace gfs
 
     inline void internal::writeU64(std::ostream &output, uint64_t value)
     {
-        writeU32(output, (value >> 32) & 0xFFFFFFFFu);
-        writeU32(output, value & 0xFFFFFFFFu);
+        writeU32(output, static_cast<uint32_t>((value >> 32) & 0xFFFFFFFFu));
+        writeU32(output, static_cast<uint32_t>(value & 0xFFFFFFFFu));
     }
 
     inline void internal::writeIndex(const std::vector<IndexEntry> &index, std::ostream &output)
@@ -203,11 +211,10 @@ namespace gfs
                 source.read(buffer.data(), buffer.size());
                 std::streamsize readBytes = source.gcount();
 
+                if (readBytes <= 0) break;
+                
                 entry.size += static_cast<uint64_t>(readBytes);
-                if (readBytes > 0)
-                {
-                    output.write(buffer.data(), readBytes);
-                }
+                output.write(buffer.data(), readBytes);
             }
 
             index.push_back(entry);
