@@ -54,6 +54,8 @@ namespace gfs
         WRITE_ERROR = 3,
         INPUT_FILE_ERROR = 4,
         INVALID_DATA_ERROR = 5,
+        ARCHIVE_NOT_LOADED_ERROR = 6,
+        ARCHIVE_FILE_NOT_FOUND_ERROR = 7,
     };
 
     struct Header
@@ -77,6 +79,7 @@ namespace gfs
 
     struct Archive
     {
+        std::string path;
         Header header;
         Index index;
     };
@@ -89,6 +92,8 @@ namespace gfs
 
     inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
     inline GfsResult readArchive(const std::string &path, Archive& archive);
+    inline GfsResult openArchiveStream(const Archive& archive, std::ifstream& stream);
+    inline GfsResult readArchivedFile(const std::string& virtualPath, std::ifstream& stream, Archive& archive, std::vector<char>& data);
 
     namespace internal
     {
@@ -106,6 +111,8 @@ namespace gfs
 
         inline uint32_t readU32(std::ifstream &input);
         inline uint64_t readU64(std::ifstream &input);
+
+        inline GfsResult openFileStream(const std::string& path, std::ifstream& stream);
     }
 }
 
@@ -153,22 +160,64 @@ namespace gfs {
 
     inline GfsResult readArchive(const std::string& path, Archive& archive)
     {
-        std::ifstream file(path.c_str(), std::ifstream::binary);
-        if (!file || !file.is_open())
+        std::ifstream file;
+        GfsResult stepResult = internal::openFileStream(path.c_str(), file);
+        
+        if (stepResult != GfsResult::SUCCESS)
         {
             GFS_DEBUG("Error, could not open archive " << path);
             return GfsResult::INPUT_FILE_ERROR;
         }
 
         Header header;
-        GfsResult stepResult = internal::readHeader(file, header);
+        stepResult = internal::readHeader(file, header);
+        if (stepResult != GfsResult::SUCCESS)
+            return stepResult;
+
+        stepResult = internal::readIndex(header.indexOffset, header.fileCount, file, archive.index);
         if (stepResult != GfsResult::SUCCESS)
             return stepResult;
 
         archive.header = header;
-        stepResult = internal::readIndex(header.indexOffset, header.fileCount, file, archive.index);
-        if (stepResult != GfsResult::SUCCESS)
-            return stepResult;
+        archive.path = path;
+        return GfsResult::SUCCESS;
+    }
+
+    inline GfsResult openArchiveStream(const Archive& archive, std::ifstream& stream) {
+        if (archive.header.fileCount == 0) // Checks if the archive was loaded
+            return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
+        return internal::openFileStream(archive.path, stream);
+    }
+
+    inline GfsResult internal::openFileStream(const std::string& path, std::ifstream& stream) {
+        stream.open(path, std::ifstream::binary);
+        if (!stream || !stream.is_open())
+            return GfsResult::INPUT_FILE_ERROR;
+        return GfsResult::SUCCESS;
+    }
+
+    inline GfsResult readArchivedFile(const std::string& virtualPath, std::ifstream& stream, Archive& archive, std::vector<char>& data) {
+        IndexEntry* matching = nullptr;
+
+        for (auto& entry : archive.index) {
+            if (entry.virtualPath.compare(virtualPath) != 0) continue;
+            matching = &entry;
+            break;
+        }
+
+        if (matching == nullptr)
+            return GfsResult::ARCHIVE_FILE_NOT_FOUND_ERROR;
+
+        stream.seekg(matching->offset, std::ios::beg);
+        if (!stream.good())
+            return GfsResult::INVALID_DATA_ERROR;
+
+        data.resize(matching->size);
+        stream.read(data.data(), matching->size);
+
+        // If there is missing data
+        if (stream.gcount() != static_cast<std::streamsize>(matching->size))
+            return GfsResult::INVALID_DATA_ERROR;
 
         return GfsResult::SUCCESS;
     }
@@ -304,9 +353,10 @@ namespace gfs {
     {
         for (auto& file : files)
         {
-            std::ifstream source(file.sourcePath.c_str(), std::ifstream::binary);
+            std::ifstream source;
+            GfsResult result = internal::openFileStream(file.sourcePath.c_str(), source);
 
-            if (!source || !source.is_open())
+            if (result != GfsResult::SUCCESS)
             {
                 GFS_DEBUG("Error, could not open file " << file.sourcePath);
                 return GfsResult::SOURCE_FILE_ERROR;
