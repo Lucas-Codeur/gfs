@@ -61,9 +61,8 @@ namespace gfs
         ARCHIVE_FILE_NOT_FOUND_ERROR = 7,
         DUPLICATE_FILE_ERROR = 8
     };
-
-    // Enables easy result printing
-    std::ostream& operator << (std::ostream& output, GfsResult result);
+    // Allows easy result printing
+    inline std::ostream &operator<<(std::ostream &output, gfs::GfsResult result);
 
     struct Header
     {
@@ -97,38 +96,39 @@ namespace gfs
     };
 
     inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
-    inline GfsResult readArchive(const std::string &path, Archive& archive);
-    inline GfsResult openArchiveInputStream(const Archive& archive, std::ifstream& stream);
-    inline GfsResult readArchivedFile(const std::string& virtualPath, std::ifstream& stream, const Archive& archive, std::vector<char>& data);
+    inline GfsResult readArchive(const std::string &path, Archive &archive);
+    inline GfsResult openArchiveInputStream(const Archive &archive, std::ifstream &stream);
+    inline GfsResult readArchivedFile(const std::string &virtualPath, std::ifstream &stream, const Archive &archive, std::vector<char> &data);
 
-    inline GfsResult extractFile(const std::string& virtualPath, const Archive& archive, std::ifstream& archiveInput, const std::string& outputPath);
-    inline GfsResult listFiles(const std::string& path, Index& index);
+    inline GfsResult extractFile(const std::string &virtualPath, const Archive &archive, std::ifstream &archiveInput, const std::string &outputPath);
+    inline GfsResult listFiles(const std::string &path, Index &index);
 
     namespace internal
     {
         // Write related stuff
         inline GfsResult writeHeaderPlaceholder(std::ostream &output);
-        inline GfsResult writeContent(const std::vector<SourceFile> &files, std::ostream &output, Index& index);
+        inline GfsResult writeContent(const std::vector<SourceFile> &files, std::ostream &output, Index &index);
         inline GfsResult writeIndex(const Index &index, std::ostream &output);
 
         inline void writeU32(std::ostream &output, uint32_t value);
         inline void writeU64(std::ostream &output, uint64_t value);
 
         // Read related stuff
-        inline GfsResult readHeader(std::ifstream &input, Header& header);
-        inline GfsResult readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream &input, Index& index);
+        inline GfsResult readHeader(std::ifstream &input, Header &header);
+        inline GfsResult readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream &input, Index &index);
 
         inline uint32_t readU32(std::ifstream &input);
         inline uint64_t readU64(std::ifstream &input);
 
-        inline GfsResult openFileInputStream(const std::string& path, std::ifstream& stream);
-        inline GfsResult openFileOutputStream(const std::string& path, std::ofstream& stream);
+        inline GfsResult openFileInputStream(const std::string &path, std::ifstream &stream);
+        inline GfsResult openFileOutputStream(const std::string &path, std::ofstream &stream);
     }
 }
 
 // Implementation
-namespace gfs {
-    inline GfsResult createArchive(const std::string& outputPath, const std::vector<SourceFile>& files)
+namespace gfs
+{
+    inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files)
     {
         GFS_DEBUG("Attempting to create archive " << outputPath);
 
@@ -169,11 +169,11 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult readArchive(const std::string& path, Archive& archive)
+    inline GfsResult readArchive(const std::string &path, Archive &archive)
     {
         std::ifstream file;
         GfsResult stepResult = internal::openFileInputStream(path.c_str(), file);
-        
+
         if (stepResult != GfsResult::SUCCESS)
         {
             GFS_DEBUG("Error, could not open archive " << path);
@@ -195,11 +195,12 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult listFiles(const std::string& path, Index& index) {
+    inline GfsResult listFiles(const std::string &path, Index &index)
+    {
         Archive archive;
         GfsResult result = readArchive(path, archive);
 
-        if (result != GfsResult::SUCCESS) 
+        if (result != GfsResult::SUCCESS)
             return result;
 
         index = std::move(archive.index);
@@ -207,15 +208,16 @@ namespace gfs {
     }
 
     // Warning : the output file will be overwritten
-    inline GfsResult extractFile(const std::string& virtualPath, const Archive& archive, std::ifstream& archiveInput, const std::string& outputPath) {
+    inline GfsResult extractFile(const std::string &virtualPath, const Archive &archive, std::ifstream &archiveInput, const std::string &outputPath)
+    {
         if (!archive.loaded)
             return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
-        
+
         auto it = archive.index.find(virtualPath);
         if (it == archive.index.end())
             return GfsResult::ARCHIVE_FILE_NOT_FOUND_ERROR;
 
-        const IndexEntry& matching = it->second;
+        const IndexEntry &matching = it->second;
 
         std::ofstream output;
         GfsResult result = internal::openFileOutputStream(outputPath, output);
@@ -233,7 +235,8 @@ namespace gfs {
 
         while (archiveInput)
         {
-            if (currentOffset >= end) break;
+            if (currentOffset >= end)
+                break;
 
             archiveInput.read(buffer.data(), static_cast<std::streamsize>(std::min(buffer.size(), end - currentOffset)));
             std::streamsize readBytes = archiveInput.gcount();
@@ -251,27 +254,31 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult internal::openFileOutputStream(const std::string& path, std::ofstream& stream) {
+    inline GfsResult internal::openFileOutputStream(const std::string &path, std::ofstream &stream)
+    {
         stream.open(path, std::ios::binary);
         if (!stream || !stream.is_open())
             return GfsResult::OUTPUT_FILE_ERROR;
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult openArchiveInputStream(const Archive& archive, std::ifstream& stream) {
+    inline GfsResult openArchiveInputStream(const Archive &archive, std::ifstream &stream)
+    {
         if (!archive.loaded)
             return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
         return internal::openFileInputStream(archive.path, stream);
     }
 
-    inline GfsResult internal::openFileInputStream(const std::string& path, std::ifstream& stream) {
+    inline GfsResult internal::openFileInputStream(const std::string &path, std::ifstream &stream)
+    {
         stream.open(path, std::ifstream::binary);
         if (!stream || !stream.is_open())
             return GfsResult::INPUT_FILE_ERROR;
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult readArchivedFile(const std::string& virtualPath, std::ifstream& stream, const Archive& archive, std::vector<char>& data) {
+    inline GfsResult readArchivedFile(const std::string &virtualPath, std::ifstream &stream, const Archive &archive, std::vector<char> &data)
+    {
         if (!archive.loaded)
             return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
 
@@ -279,8 +286,7 @@ namespace gfs {
         if (it == archive.index.end())
             return GfsResult::ARCHIVE_FILE_NOT_FOUND_ERROR;
 
-        const IndexEntry& matching = it->second;
-
+        const IndexEntry &matching = it->second;
 
         stream.seekg(matching.offset, std::ios::beg);
         if (!stream.good())
@@ -296,7 +302,7 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult internal::readHeader(std::ifstream& input, Header& header)
+    inline GfsResult internal::readHeader(std::ifstream &input, Header &header)
     {
         header.magic = readU32(input);
         header.versionMajor = readU32(input);
@@ -304,7 +310,8 @@ namespace gfs {
         header.fileCount = readU32(input);
         header.indexOffset = readU64(input);
 
-        if (header.magic != GFS_MAGIC || header.versionMajor != GFS_VERSION_MAJOR) {
+        if (header.magic != GFS_MAGIC || header.versionMajor != GFS_VERSION_MAJOR)
+        {
             GFS_DEBUG("Invalid header, please check file format and data integrity");
             return GfsResult::INVALID_DATA_ERROR;
         }
@@ -318,7 +325,7 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult internal::readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream& input, Index &index)
+    inline GfsResult internal::readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream &input, Index &index)
     {
         input.seekg(indexPos, std::ios::beg);
         if (!input.good())
@@ -352,7 +359,7 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline uint64_t internal::readU64(std::ifstream& input)
+    inline uint64_t internal::readU64(std::ifstream &input)
     {
         uint32_t high = readU32(input);
         uint32_t low = readU32(input);
@@ -360,18 +367,18 @@ namespace gfs {
         return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
     }
 
-    inline uint32_t internal::readU32(std::ifstream& input)
+    inline uint32_t internal::readU32(std::ifstream &input)
     {
         unsigned char bytes[4];
-        input.read(reinterpret_cast<char*>(bytes), sizeof(bytes));
+        input.read(reinterpret_cast<char *>(bytes), sizeof(bytes));
 
         return (static_cast<uint32_t>(bytes[0]) << 24) |
-            (static_cast<uint32_t>(bytes[1]) << 16) |
-            (static_cast<uint32_t>(bytes[2]) << 8) |
-            (static_cast<uint32_t>(bytes[3]));
+               (static_cast<uint32_t>(bytes[1]) << 16) |
+               (static_cast<uint32_t>(bytes[2]) << 8) |
+               (static_cast<uint32_t>(bytes[3]));
     }
 
-    inline GfsResult internal::writeHeaderPlaceholder(std::ostream& output)
+    inline GfsResult internal::writeHeaderPlaceholder(std::ostream &output)
     {
         writeU32(output, GFS_MAGIC);
         writeU32(output, GFS_VERSION_MAJOR);
@@ -388,25 +395,25 @@ namespace gfs {
     }
 
     // The format uses Big endian
-    inline void internal::writeU32(std::ostream& output, uint32_t value)
+    inline void internal::writeU32(std::ostream &output, uint32_t value)
     {
         unsigned char bytes[4];
         bytes[0] = static_cast<unsigned char>((value >> 24) & 0xFF);
         bytes[1] = static_cast<unsigned char>((value >> 16) & 0xFF);
         bytes[2] = static_cast<unsigned char>((value >> 8) & 0xFF);
         bytes[3] = static_cast<unsigned char>(value & 0xFF);
-        output.write(reinterpret_cast<char*>(bytes), sizeof(bytes));
+        output.write(reinterpret_cast<char *>(bytes), sizeof(bytes));
     }
 
-    inline void internal::writeU64(std::ostream& output, uint64_t value)
+    inline void internal::writeU64(std::ostream &output, uint64_t value)
     {
         writeU32(output, static_cast<uint32_t>((value >> 32) & 0xFFFFFFFFu));
         writeU32(output, static_cast<uint32_t>(value & 0xFFFFFFFFu));
     }
 
-    inline GfsResult internal::writeIndex(const Index& index, std::ostream& output)
+    inline GfsResult internal::writeIndex(const Index &index, std::ostream &output)
     {
-        for (auto& [path, entry] : index)
+        for (auto &[path, entry] : index)
         {
             writeU64(output, entry.size);
             writeU64(output, entry.offset);
@@ -423,9 +430,9 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult internal::writeContent(const std::vector<SourceFile>& files, std::ostream& output, Index& index)
+    inline GfsResult internal::writeContent(const std::vector<SourceFile> &files, std::ostream &output, Index &index)
     {
-        for (auto& file : files)
+        for (auto &file : files)
         {
             if (index.count(file.virtualPath) > 0)
                 return GfsResult::INVALID_DATA_ERROR;
@@ -463,7 +470,7 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    std::ostream& operator << (std::ostream& output, GfsResult result)
+    inline std::ostream &operator<<(std::ostream &output, gfs::GfsResult result)
     {
         switch (result)
         {
@@ -486,7 +493,7 @@ namespace gfs {
         case gfs::GfsResult::DUPLICATE_FILE_ERROR:
             return output << "DUPLICATE_FILE_ERROR";
         default:
-            //If you ever get this code error while using gfs functions, please report on github
+            // If you ever get this code error while using gfs functions, please report on github
             return output << "UNKNOWN";
         }
     };
