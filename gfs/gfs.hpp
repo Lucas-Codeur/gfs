@@ -62,6 +62,9 @@ namespace gfs
         DUPLICATE_FILE_ERROR = 8
     };
 
+    // Enables easy result printing
+    std::ostream& operator << (std::ostream& output, GfsResult result);
+
     struct Header
     {
         uint32_t magic;
@@ -459,6 +462,34 @@ namespace gfs {
 
         return GfsResult::SUCCESS;
     }
+
+    std::ostream& operator << (std::ostream& output, GfsResult result)
+    {
+        switch (result)
+        {
+        case gfs::GfsResult::SUCCESS:
+            return output << "SUCCESS";
+        case gfs::GfsResult::OUTPUT_FILE_ERROR:
+            return output << "OUTPUT_FILE_ERROR";
+        case gfs::GfsResult::SOURCE_FILE_ERROR:
+            return output << "SOURCE_FILE_ERROR";
+        case gfs::GfsResult::WRITE_ERROR:
+            return output << "WRITE_ERROR";
+        case gfs::GfsResult::INPUT_FILE_ERROR:
+            return output << "INPUT_FILE_ERROR";
+        case gfs::GfsResult::INVALID_DATA_ERROR:
+            return output << "INVALID_DATA_ERROR";
+        case gfs::GfsResult::ARCHIVE_NOT_LOADED_ERROR:
+            return output << "ARCHIVE_NOT_LOADED_ERROR";
+        case gfs::GfsResult::ARCHIVE_FILE_NOT_FOUND_ERROR:
+            return output << "ARCHIVE_FILE_NOT_FOUND_ERROR";
+        case gfs::GfsResult::DUPLICATE_FILE_ERROR:
+            return output << "DUPLICATE_FILE_ERROR";
+        default:
+            //If you ever get this code error while using gfs functions, please report on github
+            return output << "UNKNOWN";
+        }
+    };
 }
 
 #endif
