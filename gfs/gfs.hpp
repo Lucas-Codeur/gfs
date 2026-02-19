@@ -15,6 +15,7 @@ See LICENSE file for details.
 #include <vector>
 #include <fstream>
 #include <unordered_map>
+#include <algorithm>
 
 /*
 If anyone ever wants to read this code instead of enjoying life, I'd better explain the terminology :
@@ -58,6 +59,7 @@ namespace gfs
         INVALID_DATA_ERROR = 5,
         ARCHIVE_NOT_LOADED_ERROR = 6,
         ARCHIVE_FILE_NOT_FOUND_ERROR = 7,
+        DUPLICATE_FILE_ERROR = 8
     };
 
     struct Header
@@ -93,8 +95,11 @@ namespace gfs
 
     inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
     inline GfsResult readArchive(const std::string &path, Archive& archive);
-    inline GfsResult openArchiveStream(const Archive& archive, std::ifstream& stream);
+    inline GfsResult openArchiveInputStream(const Archive& archive, std::ifstream& stream);
     inline GfsResult readArchivedFile(const std::string& virtualPath, std::ifstream& stream, const Archive& archive, std::vector<char>& data);
+
+    inline GfsResult extractFile(const std::string& virtualPath, const Archive& archive, std::ifstream& archiveInput, const std::string& outputPath);
+    inline GfsResult listFiles(const std::string& path, Index& index);
 
     namespace internal
     {
@@ -113,7 +118,8 @@ namespace gfs
         inline uint32_t readU32(std::ifstream &input);
         inline uint64_t readU64(std::ifstream &input);
 
-        inline GfsResult openFileStream(const std::string& path, std::ifstream& stream);
+        inline GfsResult openFileInputStream(const std::string& path, std::ifstream& stream);
+        inline GfsResult openFileOutputStream(const std::string& path, std::ofstream& stream);
     }
 }
 
@@ -123,14 +129,15 @@ namespace gfs {
     {
         GFS_DEBUG("Attempting to create archive " << outputPath);
 
-        std::ofstream file(outputPath, std::ios::binary);
-        if (!file.good())
-            return GfsResult::OUTPUT_FILE_ERROR;
+        std::ofstream file;
+        GfsResult stepResult = internal::openFileOutputStream(outputPath, file);
+        if (stepResult != GfsResult::SUCCESS)
+            return stepResult;
 
         internal::writeHeaderPlaceholder(file);
 
         Index index;
-        GfsResult stepResult = internal::writeContent(files, file, index);
+        stepResult = internal::writeContent(files, file, index);
         if (stepResult != GfsResult::SUCCESS)
             return stepResult;
 
@@ -161,11 +168,8 @@ namespace gfs {
 
     inline GfsResult readArchive(const std::string& path, Archive& archive)
     {
-        if (!archive.loaded)
-            return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
-
         std::ifstream file;
-        GfsResult stepResult = internal::openFileStream(path.c_str(), file);
+        GfsResult stepResult = internal::openFileInputStream(path.c_str(), file);
         
         if (stepResult != GfsResult::SUCCESS)
         {
@@ -188,13 +192,76 @@ namespace gfs {
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult openArchiveStream(const Archive& archive, std::ifstream& stream) {
-        if (!archive.loaded) // Checks if the archive was loaded
-            return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
-        return internal::openFileStream(archive.path, stream);
+    inline GfsResult listFiles(const std::string& path, Index& index) {
+        Archive archive;
+        GfsResult result = readArchive(path, archive);
+
+        if (result != GfsResult::SUCCESS) 
+            return result;
+
+        index = std::move(archive.index);
+        return result;
     }
 
-    inline GfsResult internal::openFileStream(const std::string& path, std::ifstream& stream) {
+    // Warning : the output file will be overwritten
+    inline GfsResult extractFile(const std::string& virtualPath, const Archive& archive, std::ifstream& archiveInput, const std::string& outputPath) {
+        if (!archive.loaded)
+            return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
+        
+        auto it = archive.index.find(virtualPath);
+        if (it == archive.index.end())
+            return GfsResult::ARCHIVE_FILE_NOT_FOUND_ERROR;
+
+        const IndexEntry& matching = it->second;
+
+        std::ofstream output;
+        GfsResult result = internal::openFileOutputStream(outputPath, output);
+        if (result != GfsResult::SUCCESS)
+            return result;
+
+        std::vector<char> buffer(4096);
+
+        uint64_t currentOffset = matching.offset;
+        uint64_t end = matching.offset + matching.size;
+
+        archiveInput.seekg(currentOffset, std::ios::beg);
+        if (!archiveInput.good())
+            return GfsResult::INVALID_DATA_ERROR;
+
+        while (archiveInput)
+        {
+            if (currentOffset >= end) break;
+
+            archiveInput.read(buffer.data(), static_cast<std::streamsize>(std::min(buffer.size(), end - currentOffset)));
+            std::streamsize readBytes = archiveInput.gcount();
+
+            if (readBytes <= 0)
+                break;
+
+            currentOffset += static_cast<uint64_t>(readBytes);
+            output.write(buffer.data(), readBytes);
+        }
+
+        if (!output.good())
+            return GfsResult::WRITE_ERROR;
+
+        return GfsResult::SUCCESS;
+    }
+
+    inline GfsResult internal::openFileOutputStream(const std::string& path, std::ofstream& stream) {
+        stream.open(path, std::ios::binary);
+        if (!stream || !stream.is_open())
+            return GfsResult::OUTPUT_FILE_ERROR;
+        return GfsResult::SUCCESS;
+    }
+
+    inline GfsResult openArchiveInputStream(const Archive& archive, std::ifstream& stream) {
+        if (!archive.loaded)
+            return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
+        return internal::openFileInputStream(archive.path, stream);
+    }
+
+    inline GfsResult internal::openFileInputStream(const std::string& path, std::ifstream& stream) {
         stream.open(path, std::ifstream::binary);
         if (!stream || !stream.is_open())
             return GfsResult::INPUT_FILE_ERROR;
@@ -202,6 +269,9 @@ namespace gfs {
     }
 
     inline GfsResult readArchivedFile(const std::string& virtualPath, std::ifstream& stream, const Archive& archive, std::vector<char>& data) {
+        if (!archive.loaded)
+            return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
+
         auto it = archive.index.find(virtualPath);
         if (it == archive.index.end())
             return GfsResult::ARCHIVE_FILE_NOT_FOUND_ERROR;
@@ -354,8 +424,11 @@ namespace gfs {
     {
         for (auto& file : files)
         {
+            if (index.count(file.virtualPath) > 0)
+                return GfsResult::INVALID_DATA_ERROR;
+
             std::ifstream source;
-            GfsResult result = internal::openFileStream(file.sourcePath.c_str(), source);
+            GfsResult result = internal::openFileInputStream(file.sourcePath.c_str(), source);
 
             if (result != GfsResult::SUCCESS)
             {
