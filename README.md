@@ -1,4 +1,4 @@
-# GFS - Game File System
+# GFS - Game File System [Early dev]
 "Game File System" is an experimental, fast read-only archive format project intended for learning purposes and later use in games. This first implementation is C++ but the format can be implemented using any programming language.
 
 It is currently in early development so it may still be unstable, feel free to report a bug in the issues section.
@@ -6,8 +6,6 @@ It is currently in early development so it may still be unstable, feel free to r
 ## Intent
 The goal is to create a simple archive format, fast to read with random access that can easily manage thousands of relatively small files to simplify resource management in games and other apps in general.
 ## Roadmap (near-future) :
-- GFS 0.1 ✅
-- GFS CLI 0.1 ✅
 - Finish readme🟠 (quick start, how to use...)
 - Add tests and exemples 🔜
 - Improve compatibility with other compilers and linux 🔜
@@ -15,7 +13,7 @@ The goal is to create a simple archive format, fast to read with random access t
 
 ---
 # Format
-The **GFS 0.1** binary file format is composed of three parts : Header, Content and Index. All numbers use big-endian notation. There is no padding or alignment anywhere in the format.
+The **GFS 0.2** binary file format is composed of three parts : Header, Content and Index. All numbers use little-endian notation. There is no padding or alignment anywhere in the format.
 
 ## Header
 The header is the first byte sequence of the file : it contains the following informations, in the same order. And it is 24 bytes long.
@@ -25,9 +23,11 @@ The header is the first byte sequence of the file : it contains the following in
 | uint32  | uint32        | uint32        | uint32     | uint64       |
 | 4 bytes | 4 bytes       | 4 bytes       | 4 bytes    | 8 bytes      |
 
-The "magic" is used to identify GFS files, its value should always remain **0x47465330**. It is the four ascii bytes `G`,`F`,`S`,`0`, packed into a big-endian uint32.
+The "magic" is used to identify GFS files, its value should always remain **0x47465330**. It is the four ascii bytes `G`,`F`,`S`,`0`, packed into a uint32.
 
 Index offset is the absolute offset, from file start, of the index.
+
+Version major is used for breaking changes and version minor for smaller, backward compatible changes. **However** until 1.0 releases minor versions are likely to introduce breaking changes.
 
 ## Content
 Files are stored continuously directly after the header (byte 24). 

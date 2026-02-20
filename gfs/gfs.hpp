@@ -41,7 +41,7 @@ If anyone ever wants to read this code instead of enjoying life, I'd better expl
 namespace gfs
 {
     inline constexpr uint32_t GFS_VERSION_MAJOR = 0;
-    inline constexpr uint32_t GFS_VERSION_MINOR = 1;
+    inline constexpr uint32_t GFS_VERSION_MINOR = 2;
     inline constexpr uint32_t GFS_VERSION_PATCH = 0; // Used for Cmake version
 
     inline constexpr uint32_t GFS_MAGIC = 0x47465330; // GFS0
@@ -359,25 +359,6 @@ namespace gfs
         return GfsResult::SUCCESS;
     }
 
-    inline uint64_t internal::readU64(std::ifstream &input)
-    {
-        uint32_t high = readU32(input);
-        uint32_t low = readU32(input);
-
-        return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
-    }
-
-    inline uint32_t internal::readU32(std::ifstream &input)
-    {
-        unsigned char bytes[4];
-        input.read(reinterpret_cast<char *>(bytes), sizeof(bytes));
-
-        return (static_cast<uint32_t>(bytes[0]) << 24) |
-               (static_cast<uint32_t>(bytes[1]) << 16) |
-               (static_cast<uint32_t>(bytes[2]) << 8) |
-               (static_cast<uint32_t>(bytes[3]));
-    }
-
     inline GfsResult internal::writeHeaderPlaceholder(std::ostream &output)
     {
         writeU32(output, GFS_MAGIC);
@@ -392,23 +373,6 @@ namespace gfs
             return GfsResult::WRITE_ERROR;
 
         return GfsResult::SUCCESS;
-    }
-
-    // The format uses Big endian
-    inline void internal::writeU32(std::ostream &output, uint32_t value)
-    {
-        unsigned char bytes[4];
-        bytes[0] = static_cast<unsigned char>((value >> 24) & 0xFF);
-        bytes[1] = static_cast<unsigned char>((value >> 16) & 0xFF);
-        bytes[2] = static_cast<unsigned char>((value >> 8) & 0xFF);
-        bytes[3] = static_cast<unsigned char>(value & 0xFF);
-        output.write(reinterpret_cast<char *>(bytes), sizeof(bytes));
-    }
-
-    inline void internal::writeU64(std::ostream &output, uint64_t value)
-    {
-        writeU32(output, static_cast<uint32_t>((value >> 32) & 0xFFFFFFFFu));
-        writeU32(output, static_cast<uint32_t>(value & 0xFFFFFFFFu));
     }
 
     inline GfsResult internal::writeIndex(const Index &index, std::ostream &output)
@@ -468,6 +432,42 @@ namespace gfs
         }
 
         return GfsResult::SUCCESS;
+    }
+
+    inline uint64_t internal::readU64(std::ifstream &input)
+    {
+        // These two instruction need to stay in this order
+        uint32_t low = readU32(input);
+        uint32_t high = readU32(input);
+
+        return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
+    }
+
+    inline uint32_t internal::readU32(std::ifstream &input)
+    {
+        unsigned char bytes[4];
+        input.read(reinterpret_cast<char *>(bytes), sizeof(bytes));
+
+        return (static_cast<uint32_t>(bytes[3]) << 24) |
+               (static_cast<uint32_t>(bytes[2]) << 16) |
+               (static_cast<uint32_t>(bytes[1]) << 8) |
+               (static_cast<uint32_t>(bytes[0]));
+    }
+
+    inline void internal::writeU32(std::ostream &output, uint32_t value)
+    {
+        unsigned char bytes[4];
+        bytes[0] = static_cast<unsigned char>(value & 0xFF);
+        bytes[1] = static_cast<unsigned char>((value >> 8) & 0xFF);
+        bytes[2] = static_cast<unsigned char>((value >> 16) & 0xFF);
+        bytes[3] = static_cast<unsigned char>((value >> 24) & 0xFF);
+        output.write(reinterpret_cast<char *>(bytes), sizeof(bytes));
+    }
+
+    inline void internal::writeU64(std::ostream &output, uint64_t value)
+    {
+        writeU32(output, static_cast<uint32_t>(value & 0xFFFFFFFFu));
+        writeU32(output, static_cast<uint32_t>((value >> 32) & 0xFFFFFFFFu));
     }
 
     inline std::ostream &operator<<(std::ostream &output, gfs::GfsResult result)
