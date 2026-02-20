@@ -40,8 +40,8 @@ If anyone ever wants to read this code instead of enjoying life, I'd better expl
 
 namespace gfs
 {
-    inline constexpr uint32_t GFS_VERSION_MAJOR = 1;
-    inline constexpr uint32_t GFS_VERSION_MINOR = 0;
+    inline constexpr uint32_t GFS_VERSION_MAJOR = 0;
+    inline constexpr uint32_t GFS_VERSION_MINOR = 1;
     inline constexpr uint32_t GFS_VERSION_PATCH = 0; // Used for Cmake version
 
     inline constexpr uint32_t GFS_MAGIC = 0x47465330; // GFS0
