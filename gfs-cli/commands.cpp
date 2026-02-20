@@ -39,7 +39,7 @@ void help_command(int argc, char **argv)
 
 void version_command(int argc, char **argv)
 {
-    std::cout << "GFS cli for GFS 1.0.0" << std::endl;
+    std::cout << "GFS cli for GFS 0.1" << std::endl;
 }
 
 void info_command(int argc, char **argv)
