@@ -39,7 +39,7 @@ void help_command(int argc, char **argv)
 
 void version_command(int argc, char **argv)
 {
-    std::cout << "GFS cli for GFS 0.1" << std::endl;
+    std::cout << "GFS cli for GFS 0.2" << std::endl;
 }
 
 void info_command(int argc, char **argv)
@@ -59,7 +59,7 @@ void info_command(int argc, char **argv)
     std::cout << "--- Archive informations: " << inputPath->filename() << " ---" << "\n";
     std::cout << "Format:       " << "GFS" << "\n";
     std::cout << "Version:      " << archive.header.versionMajor << "." << archive.header.versionMinor << "\n";
-    std::cout << "Size:         " << fs::file_size(*inputPath) << " b" << "\n";
+    std::cout << "Size:         " << fs::file_size(*inputPath) << " bytes" << "\n";
     std::cout << "File count:   " << archive.header.fileCount << "\n";
     std::cout << "Index offset: " << archive.header.indexOffset << std::endl;
 }
