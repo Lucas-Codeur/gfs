@@ -40,38 +40,24 @@ If anyone ever wants to read this code instead of enjoying life, I'd better expl
 
 namespace gfs
 {
-    inline constexpr uint32_t GFS_VERSION_MAJOR = 0;
-    inline constexpr uint32_t GFS_VERSION_MINOR = 2;
-    inline constexpr uint32_t GFS_VERSION_PATCH = 0; // Used for Cmake version
+    inline constexpr uint16_t GFS_VERSION_MAJOR = 0;
+    inline constexpr uint16_t GFS_VERSION_MINOR = 2;
+    inline constexpr uint16_t GFS_VERSION_PATCH = 0; // Used for Cmake version
 
     inline constexpr uint32_t GFS_MAGIC = 0x47465330; // GFS0
     inline constexpr uint32_t GFS_MAX_PATH_SIZE = 2048;
 
-    inline constexpr unsigned int GFS_HEADER_SIZE = 4 * sizeof(uint32_t) + 1 * sizeof(uint64_t);
-
-    enum class GfsResult
-    {
-        SUCCESS = 0,
-        OUTPUT_FILE_ERROR = 1,
-        SOURCE_FILE_ERROR = 2,
-        WRITE_ERROR = 3,
-        INPUT_FILE_ERROR = 4,
-        INVALID_DATA_ERROR = 5,
-        ARCHIVE_NOT_LOADED_ERROR = 6,
-        ARCHIVE_FILE_NOT_FOUND_ERROR = 7,
-        DUPLICATE_FILE_ERROR = 8
-    };
-    // Allows easy result printing
-    inline std::ostream &operator<<(std::ostream &output, gfs::GfsResult result);
-
     struct Header
     {
         uint32_t magic;
-        uint32_t versionMajor;
-        uint32_t versionMinor;
+        uint16_t versionMajor;
+        uint16_t versionMinor;
+        uint32_t flags; // Intended for future use
         uint32_t fileCount;
         uint64_t indexOffset; // The index is written after the data
     };
+
+    inline constexpr unsigned int GFS_HEADER_SIZE = sizeof(Header);
 
     struct IndexEntry
     {
@@ -95,6 +81,22 @@ namespace gfs
         std::string virtualPath;
     };
 
+    enum class GfsResult
+    {
+        SUCCESS = 0,
+        OUTPUT_FILE_ERROR = 1,
+        SOURCE_FILE_ERROR = 2,
+        WRITE_ERROR = 3,
+        INPUT_FILE_ERROR = 4,
+        INVALID_DATA_ERROR = 5,
+        ARCHIVE_NOT_LOADED_ERROR = 6,
+        ARCHIVE_FILE_NOT_FOUND_ERROR = 7,
+        DUPLICATE_FILE_ERROR = 8,
+        INCOMPATIBLE_VERSION_ERROR = 9,
+    };
+    // Allows easy result printing
+    inline std::ostream &operator<<(std::ostream &output, gfs::GfsResult result);
+
     inline GfsResult createArchive(const std::string &outputPath, const std::vector<SourceFile> &files);
     inline GfsResult readArchive(const std::string &path, Archive &archive);
     inline GfsResult openArchiveInputStream(const Archive &archive, std::ifstream &stream);
@@ -110,18 +112,18 @@ namespace gfs
         inline GfsResult writeContent(const std::vector<SourceFile> &files, std::ostream &output, Index &index);
         inline GfsResult writeIndex(const Index &index, std::ostream &output);
 
-        inline void writeU32(std::ostream &output, uint32_t value);
-        inline void writeU64(std::ostream &output, uint64_t value);
-
         // Read related stuff
         inline GfsResult readHeader(std::ifstream &input, Header &header);
         inline GfsResult readIndex(uint64_t indexPos, uint32_t fileCount, std::ifstream &input, Index &index);
 
-        inline uint32_t readU32(std::ifstream &input);
-        inline uint64_t readU64(std::ifstream &input);
-
         inline GfsResult openFileInputStream(const std::string &path, std::ifstream &stream);
         inline GfsResult openFileOutputStream(const std::string &path, std::ofstream &stream);
+        inline uint16_t readU16(std::ifstream &input);
+        inline uint32_t readU32(std::ifstream &input);
+        inline uint64_t readU64(std::ifstream &input);
+        inline void writeU16(std::ostream &output, uint16_t value);
+        inline void writeU32(std::ostream &output, uint32_t value);
+        inline void writeU64(std::ostream &output, uint64_t value);
     }
 }
 
@@ -184,6 +186,9 @@ namespace gfs
         stepResult = internal::readHeader(file, header);
         if (stepResult != GfsResult::SUCCESS)
             return stepResult;
+
+        if(header.versionMajor != GFS_VERSION_MAJOR || (header.versionMajor == 0 && header.versionMinor != GFS_VERSION_MINOR))
+            return GfsResult::INCOMPATIBLE_VERSION_ERROR;
 
         stepResult = internal::readIndex(header.indexOffset, header.fileCount, file, archive.index);
         if (stepResult != GfsResult::SUCCESS)
@@ -254,27 +259,11 @@ namespace gfs
         return GfsResult::SUCCESS;
     }
 
-    inline GfsResult internal::openFileOutputStream(const std::string &path, std::ofstream &stream)
-    {
-        stream.open(path, std::ios::binary);
-        if (!stream || !stream.is_open())
-            return GfsResult::OUTPUT_FILE_ERROR;
-        return GfsResult::SUCCESS;
-    }
-
     inline GfsResult openArchiveInputStream(const Archive &archive, std::ifstream &stream)
     {
         if (!archive.loaded)
             return GfsResult::ARCHIVE_NOT_LOADED_ERROR;
         return internal::openFileInputStream(archive.path, stream);
-    }
-
-    inline GfsResult internal::openFileInputStream(const std::string &path, std::ifstream &stream)
-    {
-        stream.open(path, std::ifstream::binary);
-        if (!stream || !stream.is_open())
-            return GfsResult::INPUT_FILE_ERROR;
-        return GfsResult::SUCCESS;
     }
 
     inline GfsResult readArchivedFile(const std::string &virtualPath, std::ifstream &stream, const Archive &archive, std::vector<char> &data)
@@ -302,15 +291,19 @@ namespace gfs
         return GfsResult::SUCCESS;
     }
 
+    //
+    // Internal utilities
+    //
     inline GfsResult internal::readHeader(std::ifstream &input, Header &header)
     {
         header.magic = readU32(input);
-        header.versionMajor = readU32(input);
-        header.versionMinor = readU32(input);
+        header.versionMajor = readU16(input);
+        header.versionMinor = readU16(input);
+        header.flags = readU32(input);
         header.fileCount = readU32(input);
         header.indexOffset = readU64(input);
 
-        if (header.magic != GFS_MAGIC || header.versionMajor != GFS_VERSION_MAJOR)
+        if (header.magic != GFS_MAGIC)
         {
             GFS_DEBUG("Invalid header, please check file format and data integrity");
             return GfsResult::INVALID_DATA_ERROR;
@@ -362,8 +355,9 @@ namespace gfs
     inline GfsResult internal::writeHeaderPlaceholder(std::ostream &output)
     {
         writeU32(output, GFS_MAGIC);
-        writeU32(output, GFS_VERSION_MAJOR);
-        writeU32(output, GFS_VERSION_MINOR);
+        writeU16(output, GFS_VERSION_MAJOR);
+        writeU16(output, GFS_VERSION_MINOR);
+        writeU32(output, 0); // Flags, intended for later use
 
         // These fields will be filled after content and index
         writeU32(output, UINT32_MAX); // File count
@@ -434,13 +428,16 @@ namespace gfs
         return GfsResult::SUCCESS;
     }
 
-    inline uint64_t internal::readU64(std::ifstream &input)
+    //
+    // IO functions
+    //
+    inline uint16_t internal::readU16(std::ifstream &input)
     {
-        // These two instruction need to stay in this order
-        uint32_t low = readU32(input);
-        uint32_t high = readU32(input);
+        unsigned char bytes[2];
+        input.read(reinterpret_cast<char *>(bytes), sizeof(bytes));
 
-        return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
+        return (static_cast<uint16_t>(bytes[1]) << 8) |
+               (static_cast<uint16_t>(bytes[0]));
     }
 
     inline uint32_t internal::readU32(std::ifstream &input)
@@ -452,6 +449,23 @@ namespace gfs
                (static_cast<uint32_t>(bytes[2]) << 16) |
                (static_cast<uint32_t>(bytes[1]) << 8) |
                (static_cast<uint32_t>(bytes[0]));
+    }
+
+    inline uint64_t internal::readU64(std::ifstream &input)
+    {
+        // These two instruction need to stay in this order
+        uint32_t low = readU32(input);
+        uint32_t high = readU32(input);
+
+        return (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
+    }
+
+    inline void internal::writeU16(std::ostream &output, uint16_t value)
+    {
+        unsigned char bytes[2];
+        bytes[0] = static_cast<unsigned char>(value & 0xFF);
+        bytes[1] = static_cast<unsigned char>((value >> 8) & 0xFF);
+        output.write(reinterpret_cast<char *>(bytes), sizeof(bytes));
     }
 
     inline void internal::writeU32(std::ostream &output, uint32_t value)
@@ -468,6 +482,22 @@ namespace gfs
     {
         writeU32(output, static_cast<uint32_t>(value & 0xFFFFFFFFu));
         writeU32(output, static_cast<uint32_t>((value >> 32) & 0xFFFFFFFFu));
+    }
+
+    inline GfsResult internal::openFileInputStream(const std::string &path, std::ifstream &stream)
+    {
+        stream.open(path, std::ifstream::binary);
+        if (!stream || !stream.is_open())
+            return GfsResult::INPUT_FILE_ERROR;
+        return GfsResult::SUCCESS;
+    }
+
+    inline GfsResult internal::openFileOutputStream(const std::string &path, std::ofstream &stream)
+    {
+        stream.open(path, std::ios::binary);
+        if (!stream || !stream.is_open())
+            return GfsResult::OUTPUT_FILE_ERROR;
+        return GfsResult::SUCCESS;
     }
 
     inline std::ostream &operator<<(std::ostream &output, gfs::GfsResult result)
@@ -492,6 +522,8 @@ namespace gfs
             return output << "ARCHIVE_FILE_NOT_FOUND_ERROR";
         case gfs::GfsResult::DUPLICATE_FILE_ERROR:
             return output << "DUPLICATE_FILE_ERROR";
+        case gfs::GfsResult::INCOMPATIBLE_VERSION_ERROR:
+            return output << "INCOMPATIBLE_VERSION_ERROR";
         default:
             // If you ever get this code error while using gfs functions, please report on github
             return output << "UNKNOWN";
